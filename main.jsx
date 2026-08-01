@@ -1,186 +1,20 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import './style.css';
-
-const levels = {
-  easy: Array.from({ length: 25 }, (_, i) => ({
-    name: `Level ${i + 1}`,
-    speed: 1.15 + i * 0.05,
-    spawn: Math.max(1200 - i * 30, 520),
-    target: 500 + i * 120,
-    lanes: 3,
-  })),
-  medium: Array.from({ length: 25 }, (_, i) => ({
-    name: `Level ${i + 1}`,
-    speed: 1.55 + i * 0.07,
-    spawn: Math.max(1050 - i * 25, 420),
-    target: 800 + i * 180,
-    lanes: 4,
-  })),
-  hard: Array.from({ length: 25 }, (_, i) => ({
-    name: `Level ${i + 1}`,
-    speed: 1.9 + i * 0.09,
-    spawn: Math.max(900 - i * 20, 300),
-    target: 1100 + i * 250,
-    lanes: 5,
-  })),
-};
-
-const busTypes = [
-  { label: 'Mini', points: 10, width: 52, height: 30, color: '#ffd166' },
-  { label: 'City', points: 20, width: 64, height: 34, color: '#06d6a0' },
-  { label: 'Express', points: 35, width: 78, height: 36, color: '#118ab2' },
-];
-
-function App() {
-  const [mode, setMode] = React.useState('menu');
-  const [difficulty, setDifficulty] = React.useState('easy');
-  const [levelIndex, setLevelIndex] = React.useState(0);
-  const [score, setScore] = React.useState(0);
-  const [lives, setLives] = React.useState(3);
-  const [best, setBest] = React.useState(() => Number(localStorage.getItem('bus-fever-best') || 0));
-  const [buses, setBuses] = React.useState([]);
-  const [cars, setCars] = React.useState([]);
-  const [paused, setPaused] = React.useState(false);
-  const [message, setMessage] = React.useState('Select a difficulty and start the rush.');
-  const gameRef = React.useRef(null);
-  const rafRef = React.useRef(0);
-  const lastSpawnRef = React.useRef(0);
-  const lastFrameRef = React.useRef(0);
-  const lanePositions = React.useMemo(() => ({
-    3: [120, 290, 460],
-    4: [90, 210, 330, 450],
-    5: [70, 165, 260, 355, 450],
-  }), []);
-  const level = levels[difficulty][levelIndex];
-
-  React.useEffect(() => {
-    localStorage.setItem('bus-fever-best', String(best));
-  }, [best]);
-
-  React.useEffect(() => {
-    if (mode !== 'playing' || paused) return;
-    const tick = (t) => {
-      const dt = Math.min((t - (lastFrameRef.current || t)) / 16.67, 2.2);
-      lastFrameRef.current = t;
-      const spawnGap = level.spawn;
-      if (t - lastSpawnRef.current > spawnGap) {
-        lastSpawnRef.current = t;
-        const laneCount = level.lanes;
-        const lane = Math.floor(Math.random() * laneCount);
-        const type = busTypes[Math.floor(Math.random() * busTypes.length)];
-        setBuses((prev) => [...prev, {
-          id: crypto.randomUUID(), lane, x: -100, y: lanePositions[laneCount][lane],
-          w: type.width, h: type.height, speed: level.speed * (0.9 + Math.random() * 0.5),
-          points: type.points, color: type.color, label: type.label,
-        }]);
-      }
-      setBuses((prev) => prev.map(b => ({ ...b, x: b.x + b.speed * 3.1 * dt })).filter(b => b.x < 900));
-      setCars((prev) => prev.map(c => ({ ...c, x: c.x + c.speed * dt })).filter(c => c.x < 900));
-      setScore((s) => s);
-      rafRef.current = requestAnimationFrame(tick);
-    };
-    rafRef.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [mode, paused, level, lanePositions]);
-
-  React.useEffect(() => {
-    const id = setInterval(() => {
-      if (mode !== 'playing' || paused) return;
-      setCars((prev) => [...prev, { id: crypto.randomUUID(), x: -120, y: 520, speed: 4.4 + Math.random() * 2.8 }]);
-    }, 1200);
-    return () => clearInterval(id);
-  }, [mode, paused]);
-
-  React.useEffect(() => {
-    if (mode !== 'playing') return;
-    const hit = setInterval(() => {
-      setBuses((prev) => {
-        let removed = 0;
-        const remaining = prev.filter(bus => {
-          const crash = cars.some(car => Math.abs(car.x - bus.x) < 52 && Math.abs(car.y - bus.y) < 42);
-          if (crash) { removed += 1; return false; }
-          return true;
-        });
-        if (removed) {
-          setLives(v => {
-            const next = Math.max(0, v - removed);
-            if (next === 0) endGame('Traffic chaos. Game over.');
-            return next;
-          });
-          setMessage(removed > 1 ? `Multiple collisions! -${removed} life` : 'Collision! Avoid the lane jam.');
-        }
-        return remaining;
-      });
-    }, 120);
-    return () => clearInterval(hit);
-  }, [mode, cars]);
-
-  function startGame(diff) {
-    setDifficulty(diff);
-    setLevelIndex(0);
-    setScore(0);
-    setLives(3);
-    setBuses([]);
-    setCars([]);
-    setPaused(false);
-    setMessage(`Running ${diff} mode. Finish Level 1 to unlock the next.`);
-    lastSpawnRef.current = performance.now();
-    lastFrameRef.current = performance.now();
-    setMode('playing');
-  }
-
-  function endGame(msg) {
-    setMode('menu');
-    setPaused(false);
-    setMessage(msg);
-    setBest((b) => Math.max(b, score));
-  }
-
-  function levelUp() {
-    const gained = level.target;
-    const nextScore = score + gained;
-    setScore(nextScore);
-    setBuses([]);
-    setCars([]);
-    if (nextScore > best) setBest(nextScore);
-    if (levelIndex >= 24) {
-      setMessage(`You cleared all 25 levels on ${difficulty}.`);
-      endGame('Victory. All routes cleared.');
-    } else {
-      setLevelIndex(i => i + 1);
-      setMessage(`Level cleared. Next: ${levels[difficulty][levelIndex + 1].name}`);
-      lastSpawnRef.current = performance.now();
-    }
-  }
-
-  React.useEffect(() => {
-    if (mode !== 'playing') return;
-    const timer = setTimeout(() => {
-      if (buses.length > 8 + levelIndex / 3) levelUp();
-    }, 2600);
-    return () => clearTimeout(timer);
-  }, [buses, levelIndex, mode]);
-
-  return <div className="app">
-    <header><h1>Bus Traffic Fever</h1><p>Keep buses moving, dodge traffic, and clear 25 levels on each difficulty.</p></header>
-    {mode === 'menu' ? <section className="menu">
-      <button onClick={() => startGame('easy')}>Easy</button>
-      <button onClick={() => startGame('medium')}>Medium</button>
-      <button onClick={() => startGame('hard')}>Hard</button>
-    </section> : <section className="hud">
-      <div>Difficulty: {difficulty}</div><div>{level.name}</div><div>Score: {score}</div><div>Best: {best}</div><div>Lives: {lives}</div>
-      <button onClick={() => setPaused(p => !p)}>{paused ? 'Resume' : 'Pause'}</button>
-      <button onClick={() => endGame('Back to menu.')}>Exit</button>
-    </section>}
-    <p className="message">{message}</p>
-    <main ref={gameRef} className="road">
-      {[...Array(level.lanes)].map((_, i) => <div key={i} className="lane" style={{ top: lanePositions[level.lanes][i] }} />)}
-      {buses.map(bus => <div key={bus.id} className="bus" style={{ left: bus.x, top: bus.y, width: bus.w, height: bus.h, background: bus.color }}><span>{bus.label}</span></div>)}
-      {cars.map(car => <div key={car.id} className="car" style={{ left: car.x, top: car.y }} />)}
-    </main>
-    <footer>Progressive difficulty, 25 levels, and simple arcade scoring.</footer>
-  </div>;
-}
-
-createRoot(document.getElementById('root')).render(<App />);
+const COLORS=['#ff3b30','#ff9500','#ffcc00','#34c759','#00c7be','#0a84ff','#5856d6','#bf5af2','#ff2d92'];
+const ARROW={U:'↑',D:'↓',L:'←',R:'→'};
+const DIFF={easy:{baseR:5,baseC:5,holes:.34},medium:{baseR:6,baseC:6,holes:.22},hard:{baseR:7,baseC:7,holes:.12}};
+function rng(seed){let s=seed>>>0;return()=>((s=Math.imul(1664525,s)+1013904223>>>0)/4294967296)}
+function makeLevel(diff,n){const cfg=DIFF[diff],rnd=rng((n+1)*9137+(diff==='easy'?11:diff==='medium'?29:47));const rows=Math.min(9,cfg.baseR+Math.floor((n-1)/9)),cols=Math.min(9,cfg.baseC+Math.floor((n-1)/7));let cells=[];for(let r=0;r<rows;r++)for(let c=0;c<cols;c++)cells.push({r,c});const cr=(rows-1)/2,cc=(cols-1)/2;cells=cells.filter(p=>rnd()>cfg.holes||(Math.abs(p.r-cr)<1.4&&Math.abs(p.c-cc)<1.4));const cars=cells.map((p,i)=>{const ds=[['U',p.r],['D',rows-1-p.r],['L',p.c],['R',cols-1-p.c]].sort((a,b)=>a[1]-b[1]);const choices=ds.filter(x=>x[1]<=ds[0][1]+(diff==='hard'?2:1));const dir=choices[Math.floor(rnd()*choices.length)][0];return{id:`${n}-${p.r}-${p.c}-${i}`,r:p.r,c:p.c,dir,color:COLORS[Math.floor(rnd()*COLORS.length)]}});return{rows,cols,cars}}
+function canExit(car,cars,rows,cols){const occ=new Set(cars.filter(x=>x.id!==car.id).map(x=>`${x.r},${x.c}`));let r=car.r,c=car.c;while(true){if(car.dir==='U')r--;if(car.dir==='D')r++;if(car.dir==='L')c--;if(car.dir==='R')c++;if(r<0||r>=rows||c<0||c>=cols)return true;if(occ.has(`${r},${c}`))return false}}
+function App(){const[screen,setScreen]=React.useState('home'),[diff,setDiff]=React.useState('easy'),[level,setLevel]=React.useState(1),[board,setBoard]=React.useState(()=>makeLevel('easy',1)),[moves,setMoves]=React.useState(0),[history,setHistory]=React.useState([]),[shake,setShake]=React.useState(''),[hint,setHint]=React.useState('');const[unlocked,setUnlocked]=React.useState(()=>JSON.parse(localStorage.getItem('btf-unlocked')||'{"easy":1,"medium":1,"hard":1}'));React.useEffect(()=>localStorage.setItem('btf-unlocked',JSON.stringify(unlocked)),[unlocked]);
+function openLevel(d,n){setDiff(d);setLevel(n);setBoard(makeLevel(d,n));setMoves(0);setHistory([]);setHint('');setScreen('game')}
+function tap(car){if(canExit(car,board.cars,board.rows,board.cols)){setHistory(h=>[...h,board.cars]);setBoard(b=>({...b,cars:b.cars.filter(x=>x.id!==car.id)}));setMoves(m=>m+1);setHint('')}else{setShake(car.id);setTimeout(()=>setShake(''),260)}}
+React.useEffect(()=>{if(screen==='game'&&board.cars.length===0){setUnlocked(u=>({...u,[diff]:Math.max(u[diff],Math.min(25,level+1))}));setScreen('win')}},[board.cars.length]);
+function undo(){if(!history.length)return;setBoard(b=>({...b,cars:history[history.length-1]}));setHistory(h=>h.slice(0,-1));setMoves(m=>Math.max(0,m-1))}
+function showHint(){const x=board.cars.find(c=>canExit(c,board.cars,board.rows,board.cols));if(x){setHint(x.id);setTimeout(()=>setHint(''),1500)}}
+if(screen==='home')return <div className="app home"><div className="hero"><div className="miniRoad"><span>🚌</span><span>🚌</span><span>🚌</span></div><h1>BUS TRAFFIC<br/><b>FEVER</b></h1><p>Tap the buses in the right order. Clear the traffic jam!</p></div><div className="difficulty">{Object.keys(DIFF).map(d=><button className={d} key={d} onClick={()=>{setDiff(d);setScreen('levels')}}><strong>{d.toUpperCase()}</strong><small>25 LEVELS</small></button>)}</div></div>;
+if(screen==='levels')return <div className="app"><div className="topbar"><button onClick={()=>setScreen('home')}>‹</button><h2>{diff.toUpperCase()} LEVELS</h2><span/></div><div className="levelGrid">{Array.from({length:25},(_,i)=>i+1).map(n=>{let locked=n>unlocked[diff];return <button key={n} disabled={locked} className={locked?'locked':''} onClick={()=>openLevel(diff,n)}>{locked?'🔒':n}<small>{locked?'':'★'.repeat(n<unlocked[diff]?3:0)}</small></button>})}</div></div>;
+if(screen==='win')return <div className="app win"><div className="winCard"><div className="stars">★★★</div><h1>LEVEL CLEARED!</h1><p>{diff.toUpperCase()} · LEVEL {level}</p><div className="scorebox"><b>{moves}</b><span>MOVES</span></div><button className="primary" onClick={()=>level<25?openLevel(diff,level+1):setScreen('levels')}>{level<25?'NEXT LEVEL':'LEVELS'}</button><button onClick={()=>setScreen('levels')}>LEVEL SELECT</button></div></div>;
+const size=Math.min(58,Math.floor(390/board.cols));return <div className="app game"><div className="topbar"><button onClick={()=>setScreen('levels')}>‹</button><div><small>{diff.toUpperCase()}</small><h2>LEVEL {level}</h2></div><button onClick={()=>openLevel(diff,level)}>↻</button></div><div className="parking"><div className="exitLabel">CLEAR THE PARKING LOT</div><div className="board" style={{gridTemplateColumns:`repeat(${board.cols},${size}px)`,gridTemplateRows:`repeat(${board.rows},${size}px)`}}>{Array.from({length:board.rows*board.cols},(_,i)=><div className="cell" key={i}/>)}{board.cars.map(car=><button onClick={()=>tap(car)} key={car.id} className={`bus ${shake===car.id?'shake':''} ${hint===car.id?'hint':''}`} style={{gridRow:car.r+1,gridColumn:car.c+1,background:car.color,width:size-7,height:size-12}}><i/><span>{ARROW[car.dir]}</span><em>•••</em></button>)}</div></div><div className="controls"><button onClick={undo} disabled={!history.length}>↶<small>UNDO</small></button><div className="moves"><b>{moves}</b><small>MOVES</small></div><button onClick={showHint}>💡<small>HINT</small></button></div><p className="tip">Tap a bus when the road in its arrow direction is clear.</p></div>}
+createRoot(document.getElementById('root')).render(<App/>);
